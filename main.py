@@ -80,13 +80,29 @@ snap_label = UILabel(relative_rect=pygame.Rect(10, 290, 230, 30), text='Snap Div
 snap_options = ["4", "8", "12", "16", "24"]
 snap_dropdown = UIDropDownMenu(options_list=snap_options, starting_option="16", relative_rect=pygame.Rect(10, 320, 230, 40), manager=manager, container=right_panel)
 
+lane_label = UILabel(relative_rect=pygame.Rect(10, 330, 230, 30), text='Number of Lanes (3-7)', manager=manager, container=right_panel)
+lane_options = ["3", "4", "5", "6", "7"]
+lane_dropdown = UIDropDownMenu(options_list=lane_options,
+                               starting_option=str(current_chart.num_lanes), # 기본값 4
+                               relative_rect=pygame.Rect(10, 360, 230, 40),
+                               manager=manager,
+                               container=right_panel)
+
 # (Y좌표 수정: 370~: 노트 타입)
-note_type_label = UILabel(relative_rect=pygame.Rect(10, 370, 230, 30), text='Note Type', manager=manager, container=right_panel)
+note_type_label = UILabel(relative_rect=pygame.Rect(10, 410, 230, 30), text='Note Type', manager=manager, container=right_panel)
 note_type_names = list(current_chart.note_types.keys())
-note_type_list = UISelectionList(relative_rect=pygame.Rect(10, 400, 230, 100), item_list=note_type_names, manager=manager, container=right_panel)
+note_type_list = UISelectionList(relative_rect=pygame.Rect(10, 440, 230, 100), item_list=note_type_names, manager=manager, container=right_panel)
 
-new_note_type_button = UIButton(relative_rect=pygame.Rect(10, 510, 230, 40), text='[+] New Note Type', manager=manager, container=right_panel)
+new_note_type_button = UIButton(relative_rect=pygame.Rect(10, 530, 110, 40), 
+                                text='[+] New',
+                                manager=manager,
+                                container=right_panel)
 
+edit_note_type_button = UIButton(relative_rect=pygame.Rect(130, 530, 110, 40), 
+                                 text='[Edit Selected]',
+                                 manager=manager,
+                                 container=right_panel)
+edit_note_type_button.disable() # (아무것도 선택 안 됐으니 일단 비활성화)
 editor_title = UILabel(relative_rect=pygame.Rect(10, 10, 230, 30), text='New Note Type', manager=manager, container=right_panel)
 editor_name_label = UILabel(relative_rect=pygame.Rect(10, 60, 100, 30), text='Name:', manager=manager, container=right_panel) 
 editor_name_entry = UITextEntryLine(relative_rect=pygame.Rect(120, 60, 110, 30), manager=manager, container=right_panel)
@@ -129,11 +145,13 @@ editor_ok_button = UIButton(relative_rect=pygame.Rect(130, 325, 100, 40), text='
 default_ui_elements = [
     load_song_button, song_name_label, 
     save_chart_button, load_chart_button, bpm_label, bpm_entry, 
-    offset_label, offset_entry, # <-- 신규 UI 추가
+    offset_label, offset_entry,
     zoom_label, scale_slider, 
     snap_label, snap_dropdown, 
+    lane_label, lane_dropdown, 
     note_type_label, note_type_list, 
-    new_note_type_button
+    new_note_type_button,
+    edit_note_type_button # <-- 이 줄을 추가!
 ]
 editor_ui_elements = [
     editor_title, editor_name_label, editor_name_entry, 
@@ -157,6 +175,8 @@ last_played_time_ms = 0.0
 # [추가] 노트 에디터용 변수
 color_picker = None
 editor_selected_color = (255, 255, 255) # 기본 흰색
+editor_mode = "new" # <-- [신규!] 'new' 또는 'edit' 모드
+editing_note_name = None # <-- [신규!] 지금 편집 중인 노트 이름
 
 # --- [추가] 4. 에디터 상태 변수 ---
 current_time_ms = 0.0
@@ -367,22 +387,105 @@ while running:
                                         allow_existing_files_only=True,
                                         object_id='#load_chart_dialog')
                 
+            # 1. [+] 버튼 (기본 -> "새 노트" 에디터)
             if event.ui_element == new_note_type_button:
+                editor_mode = "new" # [수정] '새로 만들기' 모드
+
                 for element in default_ui_elements:
                     element.hide()
                 for element in editor_ui_elements:
                     element.show()
-                # 에디터 필드 초기화
+
+                # [수정] 에디터 필드 초기화
+                editor_title.set_text("New Note Type")
                 editor_name_entry.set_text("")
-                editor_selected_color = (255, 255, 255) # 튜플
-                
-                # [버그 1 수정!] 튜플 -> pygame.Color 객체로 변환!
+                editor_name_entry.enable() # [수정] 이름 칸 활성화!
+
+                editor_selected_color = (255, 255, 255)
                 editor_color_button.colours['normal_bg'] = pygame.Color(editor_selected_color) 
                 editor_color_button.rebuild()
-                
-                editor_is_long_check.set_state(False)   # <-- .set_state(False)로 수정!
+                editor_is_long_check.set_state(False)
                 editor_hitsound_check.set_state(True)
-    
+
+            # [신규!] 2. [Edit] 버튼 (기본 -> "노트 편집" 에디터)
+            if event.ui_element == edit_note_type_button:
+                if editing_note_name is None: # (선택된 노트가 없으면 무시)
+                    break
+
+                editor_mode = "edit" # [수정] '편집' 모드
+
+                for element in default_ui_elements:
+                    element.hide()
+                for element in editor_ui_elements:
+                    element.show()
+
+                # [수정] '편집할 노트' 정보로 UI 채우기
+                note_to_edit = current_chart.note_types[editing_note_name]
+
+                editor_title.set_text(f"Edit: {note_to_edit.name}")
+                editor_name_entry.set_text(note_to_edit.name)
+                editor_name_entry.disable() # [수정] 이름(Key)은 변경 못하게 막기!
+
+                editor_selected_color = note_to_edit.color
+                editor_color_button.colours['normal_bg'] = pygame.Color(note_to_edit.color)
+                editor_color_button.rebuild()
+
+                editor_is_long_check.set_state(note_to_edit.is_long_note)
+                editor_hitsound_check.set_state(note_to_edit.play_hitsound)
+
+            # 3. [Cancel] 버튼 (에디터 -> 기본)
+            if event.ui_element == editor_cancel_button:
+                for element in editor_ui_elements:
+                    element.hide()
+                for element in default_ui_elements:
+                    element.show()
+
+            # 4. [OK] 버튼 (에디터 -> 기본 + 노트 생성/수정)
+            if event.ui_element == editor_ok_button:
+
+                if editor_mode == "new":
+                    # --- '새로 만들기' 모드 로직 (기존과 동일) ---
+                    new_name = editor_name_entry.get_text()
+                    if not new_name:
+                        print("에러: 노트 이름이 비어있음")
+                    elif new_name in current_chart.note_types:
+                        print(f"에러: '{new_name}' 이름이 이미 존재함")
+                    else:
+                        new_type = chart.NoteType(
+                            name=new_name,
+                            color=editor_selected_color,
+                            is_long_note=editor_is_long_check.is_selected,
+                            play_hitsound=editor_hitsound_check.is_selected
+                        )
+                        current_chart.note_types[new_name] = new_type
+
+                        new_item_list = list(current_chart.note_types.keys())
+                        note_type_list.set_item_list(new_item_list)
+
+                        for element in editor_ui_elements:
+                            element.hide()
+                        for element in default_ui_elements:
+                            element.show()
+
+                elif editor_mode == "edit":
+                    # --- [신규!] '편집' 모드 로직 ---
+
+                    # (이름은 비활성화되어 있으니, editing_note_name을 사용)
+                    note_to_edit = current_chart.note_types[editing_note_name]
+
+                    # 1. 값 덮어쓰기
+                    note_to_edit.color = editor_selected_color
+                    note_to_edit.is_long_note = editor_is_long_check.is_selected
+                    note_to_edit.play_hitsound = editor_hitsound_check.is_selected
+
+                    print(f"'{note_to_edit.name}' 노트 타입 수정 완료!")
+
+                    # 2. 기본 뷰로 복귀
+                    for element in editor_ui_elements:
+                        element.hide()
+                    for element in default_ui_elements:
+                        element.show()
+        
             # 2. [Cancel] 버튼 (에디터 -> 기본)
             if event.ui_element == editor_cancel_button:
                 for element in editor_ui_elements:
@@ -447,9 +550,11 @@ while running:
                 current_snap_division = int(event.text)
 
         # [추가] 노트 타입 리스트 선택 이벤트
-        if event.type == pygame_gui.UI_SELECTION_LIST_NEW_SELECTION: # <--- 이렇게 수정
+        if event.type == pygame_gui.UI_SELECTION_LIST_NEW_SELECTION: 
             if event.ui_element == note_type_list:
                 current_note_type_name = event.text
+                editing_note_name = event.text # (편집할 노트 이름 기억)
+                edit_note_type_button.enable() # (버튼 활성화!)
                 print(f"노트 타입 변경: {current_note_type_name}")
         
         if event.type == pygame_gui.UI_TEXT_ENTRY_FINISHED:
@@ -504,6 +609,14 @@ while running:
                         song_name_label.set_text("No song loaded.")
                 else:
                     print("차트 불러오기 실패 (파일 오류)")
+            elif event.ui_object_id == '#load_chart_dialog':
+                if current_chart.load_from_json(event.text):
+                    # [핵심] 불러오기 성공 후 UI 새로고침
+                    bpm_entry.set_text(str(current_chart.bpm))
+                    offset_entry.set_text(str(current_chart.offset_ms))
+                    lane_dropdown.set_text(str(current_chart.num_lanes)) # <-- 이 줄을 추가!
+                    new_item_list = list(current_chart.note_types.keys())
+                    note_type_list.set_item_list(new_item_list)
 
         # [추가] 색상 선택기 팝업 이벤트
         if event.type == pygame_gui.UI_COLOUR_PICKER_COLOUR_PICKED:
@@ -521,6 +634,16 @@ while running:
             if event.ui_element == color_picker:
                 editor_color_button.enable()
                 color_picker = None
+
+        if event.type == pygame_gui.UI_DROP_DOWN_MENU_CHANGED:
+            # 1. 스냅 변경
+            if event.ui_element == snap_dropdown:
+                current_snap_division = int(event.text)
+            
+            # 2. [신규] 라인 수 변경
+            elif event.ui_element == lane_dropdown:
+                current_chart.num_lanes = int(event.text)
+                print(f"라인 수 변경: {current_chart.num_lanes}")
 
 
     manager.update(time_delta)
